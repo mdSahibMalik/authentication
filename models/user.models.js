@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
+import jwt from 'jsonwebtoken';
 
 const userSchema = new mongoose.Schema({
     name: String,
@@ -10,7 +11,7 @@ const userSchema = new mongoose.Schema({
         masLength: [32, "Password cannot have more than 32 characters."]
     },
     phone: String,
-    accountvarified: { type: Boolean, default: false },
+    accountverified: { type: Boolean, default: false },
     verificationCode: Number,
     verificationCodeExpire: Date,
     resetPasswordToken: String,
@@ -27,9 +28,15 @@ userSchema.pre('save', async function (next) {
     this.password = await bcrypt.hash(this.password, 10);
 })
 
-userSchema.methods.comparedPassword = async function (enteredPassword) {
+userSchema.methods.comparePassword = async function (enteredPassword) {
     return await bcrypt.compare(enteredPassword, this.password)
 };
+
+userSchema.methods.generateToken = async function(){
+    return await jwt.sign({id:this._id}, process.env.JWT_SECRET_KEY,{
+        expiresIn: process.env.JWT_EXPIRE_TIME
+    })
+}
 
 userSchema.methods.generateVerificationCode = function () {
     function generateRandomeDigit() {

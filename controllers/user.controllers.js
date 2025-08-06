@@ -2,6 +2,7 @@ import asyncErrorHandler from "../middleware/asyncErrorHandler.js";
 import ErrorHandler from "../middleware/errorHandler.js";
 import { User } from "../models/user.models.js";
 import { sendMail } from "../utils/sendEmail.js";
+import { sendToken } from "../utils/sendToken.js";
 
 const register = asyncErrorHandler(async (req, res, next) => {
   try {
@@ -19,7 +20,7 @@ const register = asyncErrorHandler(async (req, res, next) => {
       return next(new ErrorHandler("Invalid phone number ", 400));
     }
 
-    const existingUser = await User.findOne({ $or: [{ email, accountvarified: true, phone, accountvarified: true }] });
+    const existingUser = await User.findOne({ $or: [{ email, accountverified: true, phone, accountverified: true }] });
 
 
     if (existingUser) {
@@ -27,8 +28,8 @@ const register = asyncErrorHandler(async (req, res, next) => {
     }
     const registerUserAttemt = await User.find({
       $or: [{
-        phone, accountvarified: false,
-        email, accountvarified: false
+        phone, accountverified: false,
+        email, accountverified: false
       }]
     });
     if (registerUserAttemt.length > 3) {
@@ -45,16 +46,16 @@ const register = asyncErrorHandler(async (req, res, next) => {
 
     await sendVerificationCode(verificationMethod, verificationCode, email, phone);
 
-    user.save({validateBeforeSave:true});
+    user.save({ validateBeforeSave: true });
     return res.status(201).json({
       success: true,
       message: "User created successfully",
       user: {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone
-    }
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone
+      }
     });
   } catch (error) {
     next(error)
@@ -136,4 +137,61 @@ function generateEmailTemplate(verificationCode) {
 
 }
 
-export default register;
+const verifyOTP = asyncErrorHandler(async (req, res, next) => {
+  const { email, password, otp } = req.body;
+  try {
+
+    const userExist = await User.find({ email: email, accountverified: false }).sort({ createdAt: -1 }).select("-password");
+
+
+
+    if (!userExist) {
+      return next(new ErrorHandler("'user does't exist ", 404));
+    }
+
+
+    let storeUser;
+
+    if (userExist.length > 1) {
+      storeUser = userExist[0];
+
+      await User.deleteMany({
+        _id: { $ne: storeUser._id },
+        email: email, accountverified: false
+      });
+    } else {
+      storeUser = userExist[0];
+    }
+
+    //* check user's OTP is valid or not
+    if(storeUser.verificationCode !== Number(otp)){
+      return next(new ErrorHandler("OTP is not valid", 401));
+    }
+
+    
+    const currentDate = Date.now();
+    const verificationCodeExpire = new Date(storeUser.verificationCodeExpire).getTime();
+    
+    if(currentDate > verificationCodeExpire){
+      return next( new ErrorHandler("OTP expired.", 401));
+    }
+    
+    storeUser.accountverified = true;
+    storeUser.verificationCode = null;
+    storeUser.verificationCodeExpire = null;
+    storeUser.save({validateModifiedOnly: true});
+
+    //! you can send token at the verified OTP time or at the login time as you wish you can do what you want.
+
+    await sendToken(storeUser, 200,"Account verified", res);
+
+  //  return res.status(200).json({success: true, message: 'OTP verified successfully', });
+
+  } catch (error) {
+    next(error);
+  }
+})
+
+
+
+export { register, verifyOTP };

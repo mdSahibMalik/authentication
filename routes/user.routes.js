@@ -1,9 +1,10 @@
 import express from "express";
-import register  from "../controllers/user.controllers.js";
-const  userRouter = express.Router()
+import { register, verifyOTP } from "../controllers/user.controllers.js";
+const userRouter = express.Router()
 
-userRouter.post('/register',register);
-userRouter.get('/register',(req, res)=>{
+userRouter.post('/register', register);
+userRouter.post('/verify-otp', verifyOTP);
+userRouter.get('/register', (req, res) => {
     res.status(200).send('this is register route');
 });
 
