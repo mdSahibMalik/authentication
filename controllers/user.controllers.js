@@ -3,6 +3,7 @@ import ErrorHandler from "../middleware/errorHandler.js";
 import { User } from "../models/user.models.js";
 import { sendMail } from "../utils/sendEmail.js";
 import { sendToken } from "../utils/sendToken.js";
+import crypto from 'crypto';
 
 const register = asyncErrorHandler(async (req, res, next) => {
   try {
@@ -138,7 +139,7 @@ function generateEmailTemplate(verificationCode) {
 }
 
 const verifyOTP = asyncErrorHandler(async (req, res, next) => {
-  const { email, password, otp } = req.body;
+  const { email, otp } = req.body;
   try {
 
     const userExist = await User.find({ email: email, accountverified: false }).sort({ createdAt: -1 }).select("-password");
@@ -164,34 +165,134 @@ const verifyOTP = asyncErrorHandler(async (req, res, next) => {
     }
 
     //* check user's OTP is valid or not
-    if(storeUser.verificationCode !== Number(otp)){
+    if (storeUser.verificationCode !== Number(otp)) {
       return next(new ErrorHandler("OTP is not valid", 401));
     }
 
-    
+
     const currentDate = Date.now();
     const verificationCodeExpire = new Date(storeUser.verificationCodeExpire).getTime();
-    
-    if(currentDate > verificationCodeExpire){
-      return next( new ErrorHandler("OTP expired.", 401));
+
+    if (currentDate > verificationCodeExpire) {
+      return next(new ErrorHandler("OTP expired.", 401));
     }
-    
+
     storeUser.accountverified = true;
     storeUser.verificationCode = null;
     storeUser.verificationCodeExpire = null;
-    storeUser.save({validateModifiedOnly: true});
+    storeUser.save({ validateModifiedOnly: true });
 
     //! you can send token at the verified OTP time or at the login time as you wish you can do what you want.
 
-    await sendToken(storeUser, 200,"Account verified", res);
+    await sendToken(storeUser, 200, "Account verified", res);
 
-  //  return res.status(200).json({success: true, message: 'OTP verified successfully', });
+    //  return res.status(200).json({success: true, message: 'OTP verified successfully', });
 
   } catch (error) {
     next(error);
   }
 })
 
+const login = asyncErrorHandler(async (req, res, next) => {
+  const { email, password } = req.body;
+  try {
+    if (!email || !password) {
+      return next(new ErrorHandler("email or passwrod must be required.", 401));
+    }
 
+    const userExist = await User.findOne({ email, accountverified: true }).select("+password");
+    if (!userExist) {
+      return next(new ErrorHandler('User not found', 404));
+    }
 
-export { register, verifyOTP };
+    const comparePass = await userExist.comparePassword(password);
+    if (!comparePass) {
+      return next(new ErrorHandler("Invalid use or password"));
+    }
+
+    await sendToken(userExist, 200, 'User logged in successfully', res);
+    // return res.status(200).send('User logged in successfully ')
+
+  } catch (error) {
+    next(error)
+  }
+})
+
+const logOut = asyncErrorHandler(async (req, res, next) => {
+
+  res.status(200).cookie('token', '', {
+    expires: new Date(Date.now()),
+    httpOnly: true
+  }).json({ success: true, message: 'User logged out successufully' });
+});
+
+const getUser = asyncErrorHandler(async (req, res, next) => {
+  const user = req.user;
+  return res.status(200).json({
+    success: true,
+    user
+  })
+})
+
+const forgotPassword = asyncErrorHandler(async (req, res, next) => {
+  const email = req.body;
+  if (!email) {
+    return next(new ErrorHandler("Email is Required", 403));
+  }
+  const user = await User.findOne({ email: req.body.email, accountverified: true });
+  if (!user) {
+    return next(new ErrorHandler("User not found ", 404));
+  }
+
+  const resetToken = user.generateResetToken();
+  user.save({ validateBeforeSave: false });
+  const resetPasswordUri = `${process.env.FRON_END_URI}/password/reset/${resetToken}`;
+  const message = `Your reset password Token is:- \n \n ${resetPasswordUri} \n \n if you have not requested this email please ignore it.`
+
+  try {
+    await sendMail({ email: user.email, subject: "PAPERGINNIE APP RESET PASSWORD", message });
+    return res.status(200).json({
+      success: true,
+      message: `Reset password token has been send to ${user.email} successfully`
+    });
+
+  } catch (error) {
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    user.save({ validateBeforeSave: false });
+    return next(new ErrorHandler(error.message ? error.message : "something went wrong", 500));
+  }
+});
+
+const resetPassword = asyncErrorHandler(async (req, res, next) => {
+  const { token } = req.params;
+  const { password, confirmPassword } = req.body;
+  if (!password && !confirmPassword) {
+    return next(new ErrorHandler("password & confirm passworm are required.", 404));
+  }
+
+  try {
+    const resetToken = crypto.createHash('sha256').update(token).digest('hex');
+    const user = await User.findOne({ resetPasswordToken: resetToken, resetPasswordExpire: { $gt: Date.now() } });
+    if (!user) {
+      return next(new ErrorHandler('User password token is invalid or expired.', 400));
+    }
+  
+    if (password !== confirmPassword) {
+      return next(new ErrorHandler("Password & confirm password does not match.", 400));
+    }
+    user.password = password
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+    return res.status(200).json({
+      success:true,
+      message:"Password reset successfully."
+    })
+  } catch (error) {
+    return next(new ErrorHandler('something went wrong', 500));
+  }
+
+})
+
+export { register, verifyOTP, login, logOut, getUser, forgotPassword, resetPassword };

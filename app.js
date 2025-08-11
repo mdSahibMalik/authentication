@@ -4,6 +4,7 @@ import cors from 'cors';
 import { connection } from './databases/connection.js';
 import { errorMiddleware } from './middleware/errorHandler.js';
 import userRouter from './routes/user.routes.js';
+import { remeveUnverifiedAccount } from './automation/removeUnverifiedAccount.js';
 
 export const app = express()
 
@@ -15,7 +16,8 @@ app.use(cors({
 
 app.use(cookieParser());
 app.use(express.urlencoded({extended:true}));
-app.use(express.json())
+app.use(express.json());
+remeveUnverifiedAccount();
 connection()
 
 app.get('/', (req, res)=>{
